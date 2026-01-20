@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jeu de Lecture - Fluence CE1</title>
+    
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    
+    <!-- Babel -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Google Fonts -->
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Andika&family=Fredoka:wght@400;600&display=swap');
+        
+        body {
+            font-family: 'Andika', sans-serif;
+            background-color: #000000;
+            color: #ffffff;
+            overflow-x: hidden;
+        }
+
+        h1, h2, h3, button, input, textarea {
+            font-family: 'Fredoka', sans-serif;
+        }
+
+        .word {
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            display: inline-block;
+            margin: 0 0.2em;
+            padding: 0.1em 0.2em;
+        }
+
+        .word-future {
+            color: #ffffff;
+            opacity: 0.4;
+        }
+
+        /* Grossissement à peine perceptible (1.15) */
+        .word-current {
+            color: #ffffff;
+            opacity: 1;
+            transform: scale(1.15); 
+            font-weight: bold;
+            z-index: 10;
+        }
+
+        .word-past-correct {
+            color: #9ca3af; /* Gris moyen */
+            opacity: 0.6;
+            transform: scale(1);
+        }
+
+        .word-past-skipped {
+            color: #4b5563; /* Gris foncé */
+            opacity: 0.4;
+            transform: scale(0.9);
+            font-style: italic;
+        }
+
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+
+        .fade-in {
+            animation: fadeIn 0.5s ease-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: scale(0.95); }
+            to { opacity: 1; transform: scale(1); }
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        const IconBase = ({ children, size = 24, className = "" }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+                {children}
+            </svg>
+        );
+
+        const Mic = (props) => (
+            <IconBase {...props}>
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                <line x1="12" y1="19" x2="12" y2="23"/>
+                <line x1="8" y1="23" x2="16" y2="23"/>
+            </IconBase>
+        );
+
+        const Home = (props) => (
+            <IconBase {...props}>
+                <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+                <polyline points="9 22 9 12 15 12 15 22"/>
+            </IconBase>
+        );
+
+        const BookOpen = (props) => (
+            <IconBase {...props}>
+                <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
+                <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+            </IconBase>
+        );
+
+        const Edit = (props) => (
+             <IconBase {...props}>
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+            </IconBase>
+        );
+
+        const Save = (props) => (
+             <IconBase {...props}>
+                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                <polyline points="7 3 7 8 15 8"></polyline>
+            </IconBase>
+        );
+
+        const INITIAL_LEVELS = [
+            {
+                id: 'niv1',
+                name: 'Niveau 1 : Apprenti',
+                color: 'bg-green-900 border-green-700 text-green-100',
+                texts: [
+                    { id: 101, title: "Le chat de Papi", content: "Papi a un petit chat. Il est gris et blanc. Le chat aime boire du lait. Il dort sur le tapis du salon. Papi aime beaucoup son chat." },
+                    { id: 102, title: "La pomme rouge", content: "Marie mange une pomme. La pomme est rouge et sucrée. Marie donne un morceau à son frère. C'est bon les fruits pour la santé." }
+                ]
+            },
+            {
+                id: 'niv2',
+                name: 'Niveau 2 : Explorateur',
+                color: 'bg-blue-900 border-blue-700 text-blue-100',
+                texts: [
+                    { id: 201, title: "Le vélo neuf", content: "Pour son anniversaire, Lucas a reçu un vélo. Il est bleu avec une sonnette brillante. Lucas met son casque et part faire un tour dans le parc. Il roule très vite sur le chemin." },
+                    { id: 202, title: "La classe à la mer", content: "La classe de CE1 part en voyage. Ils vont voir la mer en autocar. Les élèves chantent des chansons. Quand ils arrivent, ils voient les gros bateaux et le sable chaud." }
+                ]
+            },
+            {
+                id: 'niv3',
+                name: 'Niveau 3 : Expert',
+                color: 'bg-purple-900 border-purple-700 text-purple-100',
+                texts: [
+                    { id: 301, title: "Le robot farceur", content: "Tom fabrique un robot avec des cartons. Il ajoute des boutons et des lumières. Soudain, le robot se met à parler ! Il raconte des blagues et fait rire toute la famille. C'est un robot très drôle." },
+                    { id: 302, title: "Nuit sous la tente", content: "L'été, Sarah et son papa dorment dans le jardin. Ils montent une tente verte sous le grand arbre. La nuit, ils écoutent les hiboux et regardent les étoiles. Sarah n'a pas peur du noir avec sa lampe de poche." }
+                ]
+            }
+        ];
+
+        const normalize = (str) => {
+            return str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "").trim();
+        };
+
+        const App = () => {
+            const [levels, setLevels] = useState(INITIAL_LEVELS);
+            const [view, setView] = useState('levels');
+            const [selectedLevelId, setSelectedLevelId] = useState(null);
+            const [selectedText, setSelectedText] = useState(null);
+            const [words, setWords] = useState([]);
+            const [currentIndex, setCurrentIndex] = useState(0);
+            const [isListening, setIsListening] = useState(false);
+            const [startTime, setStartTime] = useState(null);
+            const [results, setResults] = useState([]);
+            const [isEditing, setIsEditing] = useState(false);
+            
+            const recognitionRef = useRef(null);
+            const currentWordRef = useRef(null);
+            const currentIndexRef = useRef(0);
+            const wordsRef = useRef([]);
+
+            // Helper pour récupérer le niveau actuel depuis l'état (pour avoir les modifs)
+            const getCurrentLevel = () => levels.find(l => l.id === selectedLevelId);
+
+            useEffect(() => { currentIndexRef.current = currentIndex; }, [currentIndex]);
+            useEffect(() => { wordsRef.current = words; }, [words]);
+
+            const isMatch = (spoken, target) => {
+                if (spoken === target) return true;
+                if (spoken.includes(target)) return true;
+                if (target === spoken + 's') return true;
+                if (target === spoken + 'x') return true;
+                if (target === spoken + 'ent') return true;
+                return false;
+            };
+
+            useEffect(() => {
+                if (!isListening) return;
+
+                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                if (!SpeechRecognition) return;
+
+                const recognition = new SpeechRecognition();
+                recognitionRef.current = recognition;
+                recognition.continuous = true;
+                recognition.interimResults = true;
+                recognition.lang = 'fr-FR';
+
+                recognition.onresult = (event) => {
+                    const transcript = event.results[event.results.length - 1][0].transcript;
+                    const spokenWords = transcript.trim().split(/\s+/).filter(w => w.length > 0);
+                    
+                    let targetIndex = currentIndexRef.current;
+                    const targetList = wordsRef.current;
+
+                    for (let spokenWord of spokenWords) {
+                        const normalizedSpoken = normalize(spokenWord);
+                        
+                        for (let offset = 0; offset <= 2; offset++) {
+                            const lookAheadIndex = targetIndex + offset;
+                            if (lookAheadIndex >= targetList.length) break;
+
+                            const target = targetList[lookAheadIndex].clean;
+                            
+                            if (offset > 0 && target.length <= 3) {
+                                continue;
+                            }
+
+                            if (isMatch(normalizedSpoken, target)) {
+                                if (offset > 0) {
+                                    markAs(targetIndex, lookAheadIndex, 'skipped');
+                                }
+                                markAs(lookAheadIndex, lookAheadIndex + 1, 'correct');
+                                targetIndex = lookAheadIndex + 1;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (targetIndex > currentIndexRef.current) {
+                        // NOTE: On ne lance plus le timer ici pour éviter les faux départs
+                        setCurrentIndex(targetIndex);
+                        if (targetIndex >= targetList.length) finish();
+                    }
+                };
+
+                recognition.onend = () => {
+                    if (isListening && currentIndexRef.current < wordsRef.current.length) {
+                        try { recognition.start(); } catch(e) {}
+                    }
+                };
+
+                try { recognition.start(); } catch(e) {}
+                return () => recognition.stop();
+            }, [isListening]);
+
+            const markAs = (from, to, status) => {
+                setResults(prev => {
+                    const newRes = [...prev];
+                    for (let i = from; i < to; i++) {
+                        if (newRes[i] !== 'correct') {
+                            newRes[i] = status;
+                        }
+                    }
+                    return newRes;
+                });
+            };
+
+            useEffect(() => {
+                if (currentWordRef.current) {
+                    currentWordRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }, [currentIndex, view]);
+
+            // --- GESTION DE L'ÉDITION ---
+            const handleTextUpdate = (textId, field, value) => {
+                setLevels(prevLevels => prevLevels.map(level => {
+                    if (level.id !== selectedLevelId) return level;
+                    return {
+                        ...level,
+                        texts: level.texts.map(t => t.id === textId ? { ...t, [field]: value } : t)
+                    };
+                }));
+            };
+
+            // --- JEU ---
+            const startGame = (text) => {
+                setSelectedText(text);
+                const splitWords = text.content.split(' ').map((w, i) => ({
+                    original: w,
+                    clean: normalize(w),
+                    id: i
+                }));
+                setWords(splitWords);
+                setCurrentIndex(0);
+                setResults(new Array(splitWords.length).fill(null));
+                setIsListening(false);
+                setStartTime(null);
+                setView('game');
+            };
+
+            const startTimerAndListening = () => {
+                setStartTime(Date.now()); // Démarrage précis du chronomètre
+                setIsListening(true);
+            };
+
+            const finish = () => {
+                setIsListening(false);
+                if (recognitionRef.current) recognitionRef.current.stop();
+                setView('result');
+            };
+
+            // --- VUES ---
+
+            if (view === 'levels') {
+                return (
+                    <div className="min-h-screen bg-black text-white p-8 flex flex-col items-center">
+                        <h1 className="text-5xl font-black mb-12 text-center bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-green-400">LECTURE FLUIDE</h1>
+                        <div className="w-full max-w-md space-y-6">
+                            {levels.map(l => (
+                                <button key={l.id} onClick={() => {setSelectedLevelId(l.id); setView('textSelection');}} 
+                                className={`w-full p-8 rounded-3xl border-2 border-white/10 ${l.color} hover:scale-105 transition-transform text-left shadow-2xl`}>
+                                    <h3 className="text-2xl font-bold">{l.name}</h3>
+                                    <p className="opacity-70 text-sm">Choisis ton histoire</p>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                );
+            }
+
+            if (view === 'textSelection') {
+                const currentLevel = getCurrentLevel();
+                return (
+                    <div className="min-h-screen bg-black text-white p-8 flex flex-col items-center">
+                        <div className="w-full max-w-md flex justify-between items-center mb-8">
+                            <button onClick={() => setView('levels')} className="opacity-50 hover:opacity-100 flex items-center gap-2">← Retour</button>
+                            <button 
+                                onClick={() => setIsEditing(!isEditing)} 
+                                className={`flex items-center gap-2 px-4 py-2 rounded-full font-bold transition-colors ${isEditing ? 'bg-yellow-600 text-white' : 'bg-zinc-800 text-zinc-400'}`}
+                            >
+                                {isEditing ? <><Save size={18}/> Finir</> : <><Edit size={18}/> Éditer</>}
+                            </button>
+                        </div>
+
+                        <h2 className="text-3xl font-bold mb-8 text-blue-400">{currentLevel.name}</h2>
+                        
+                        <div className="w-full max-w-md space-y-4">
+                            {currentLevel.texts.map(t => (
+                                <div key={t.id} className="w-full bg-white/5 border border-white/10 rounded-2xl overflow-hidden transition-colors">
+                                    {isEditing ? (
+                                        <div className="p-4 flex flex-col gap-3">
+                                            <label className="text-xs text-zinc-500 uppercase font-bold">Titre</label>
+                                            <input 
+                                                type="text" 
+                                                value={t.title}
+                                                onChange={(e) => handleTextUpdate(t.id, 'title', e.target.value)}
+                                                className="bg-black/40 border border-white/20 rounded p-2 text-white font-bold w-full"
+                                            />
+                                            <label className="text-xs text-zinc-500 uppercase font-bold">Contenu</label>
+                                            <textarea 
+                                                value={t.content}
+                                                onChange={(e) => handleTextUpdate(t.id, 'content', e.target.value)}
+                                                className="bg-black/40 border border-white/20 rounded p-2 text-white w-full h-32 text-sm"
+                                            />
+                                        </div>
+                                    ) : (
+                                        <button onClick={() => startGame(t)} className="w-full p-6 text-left flex items-center gap-4 hover:bg-white/10">
+                                            <BookOpen className="text-green-400 shrink-0" />
+                                            <span className="text-xl font-medium">{t.title}</span>
+                                        </button>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                );
+            }
+
+            if (view === 'game') {
+                return (
+                    <div className="fixed inset-0 bg-black flex flex-col">
+                        <div className="p-4 border-b border-white/10 flex justify-between items-center bg-zinc-900">
+                            <button onClick={() => setView('textSelection')} className="text-white/40 hover:text-white">Quitter</button>
+                            <span className="font-bold text-white/80">{selectedText.title}</span>
+                            <div className="w-10"></div>
+                        </div>
+
+                        <div className="flex-1 relative flex flex-col items-center justify-center overflow-hidden">
+                            <div className="w-full max-w-4xl h-full overflow-y-auto px-8 py-[40vh] text-center no-scrollbar scroll-smooth">
+                                <div className="text-5xl md:text-6xl leading-[2.5] tracking-wide">
+                                    {words.map((word, i) => (
+                                        <span
+                                            key={i}
+                                            ref={i === currentIndex ? currentWordRef : null}
+                                            className={`word 
+                                                ${i < currentIndex ? (results[i] === 'correct' ? 'word-past-correct' : 'word-past-skipped') : ''}
+                                                ${i === currentIndex ? 'word-current' : 'word-future'}
+                                            `}
+                                        >
+                                            {word.original}
+                                        </span>
+                                    ))}
+                                </div>
+                            </div>
+                            <div className="absolute top-0 inset-x-0 h-40 bg-gradient-to-b from-black to-transparent pointer-events-none"></div>
+                            <div className="absolute bottom-0 inset-x-0 h-40 bg-gradient-to-t from-black to-transparent pointer-events-none"></div>
+                        </div>
+
+                        <div className="p-8 bg-zinc-900 border-t border-white/10 flex flex-col items-center gap-6 shadow-2xl">
+                            {!isListening ? (
+                                <button onClick={startTimerAndListening} className="bg-white text-black text-2xl font-black px-12 py-5 rounded-full flex items-center gap-4 shadow-white/20 shadow-lg hover:scale-105 transition-transform">
+                                    <Mic size={32} /> COMMENCER
+                                </button>
+                            ) : (
+                                <div className="flex gap-4 w-full max-w-lg">
+                                    <button 
+                                        onClick={() => {
+                                            markAs(currentIndex, currentIndex + 1, 'skipped');
+                                            setCurrentIndex(prev => prev + 1);
+                                            if (currentIndex + 1 >= words.length) finish();
+                                        }} 
+                                        className="flex-1 bg-white/10 text-white font-bold py-5 rounded-2xl border border-white/10 active:scale-95 transition-transform"
+                                    >
+                                        Passer le mot
+                                    </button>
+                                    <button onClick={() => setIsListening(false)} className="bg-red-500/20 text-red-500 font-bold px-8 py-5 rounded-2xl border border-red-500/30">
+                                        Pause
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                );
+            }
+
+            if (view === 'result') {
+                const correctCount = results.filter(r => r === 'correct').length;
+                const skippedCount = results.filter(r => r === 'skipped').length;
+                
+                // CALCUL MCLM CORRECT : (Mots Justes * 60) / Secondes
+                const endTime = Date.now();
+                // Utilisation de startTime s'il existe, sinon fallback (sécurité)
+                const durationSec = Math.max((endTime - (startTime || endTime)) / 1000, 1);
+                const wpm = Math.round((correctCount * 60) / durationSec);
+
+                return (
+                    <div className="min-h-screen bg-black flex items-center justify-center p-6">
+                        <div className="bg-zinc-900 w-full max-w-lg p-10 rounded-[3rem] border border-white/10 shadow-2xl fade-in">
+                            <h2 className="text-4xl font-black text-center mb-10 text-white">Résultats 🏆</h2>
+                            
+                            <div className="space-y-4 mb-8">
+                                <div className="bg-white/5 p-6 rounded-3xl flex justify-between items-center">
+                                    <span className="text-white/60 font-bold uppercase text-xs tracking-widest">Fluence (MCLM)</span>
+                                    <span className="text-3xl font-black text-blue-400">{wpm} <small className="text-xs">mots/min</small></span>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="bg-green-500/10 p-6 rounded-3xl border border-green-500/20 flex flex-col items-center">
+                                        <p className="text-green-500 text-[10px] font-bold uppercase mb-1">Mots Bien lus</p>
+                                        <p className="text-4xl font-black text-green-500">{correctCount}</p>
+                                    </div>
+                                    <div className="bg-emerald-900/10 p-6 rounded-3xl border border-emerald-700/20 flex flex-col items-center">
+                                        <p className="text-emerald-300 text-[10px] font-bold uppercase mb-1">Mots Sautés</p>
+                                        <p className="text-4xl font-black text-emerald-300 opacity-60">{skippedCount}</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="bg-black/60 p-6 rounded-2xl mb-8 border border-white/5 max-h-48 overflow-y-auto">
+                                <div className="flex flex-wrap justify-center gap-2 text-lg">
+                                    {words.map((w, i) => (
+                                        <span key={i} className={results[i] === 'correct' ? 'text-green-500 font-bold' : 'text-emerald-300/30'}>
+                                            {w.original}
+                                        </span>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <button onClick={() => setView('levels')} className="w-full bg-white text-black font-black py-5 rounded-2xl text-xl hover:bg-zinc-200 transition-colors">
+                                Retour au menu
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
