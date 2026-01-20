@@ -42,11 +42,11 @@
             opacity: 0.4;
         }
 
-        /* Grossissement à peine perceptible (1.15) */
+        /* MODIFICATION: Suppression du grossissement (scale 1) */
         .word-current {
             color: #ffffff;
             opacity: 1;
-            transform: scale(1.15); 
+            transform: scale(1); 
             font-weight: bold;
             z-index: 10;
         }
@@ -386,7 +386,8 @@
                         </div>
 
                         <div className="flex-1 relative flex flex-col items-center justify-center overflow-hidden">
-                            <div className="w-full max-w-4xl h-full overflow-y-auto px-8 py-[40vh] text-center no-scrollbar scroll-smooth">
+                            {/* MODIFICATION: Largeur adaptative (max-w-[90%]) pour plus de mots par ligne sur grand écran */}
+                            <div className="w-full max-w-[95%] lg:max-w-[90%] h-full overflow-y-auto px-4 md:px-12 py-[40vh] text-center no-scrollbar scroll-smooth">
                                 <div className="text-5xl md:text-6xl leading-[2.5] tracking-wide">
                                     {words.map((word, i) => (
                                         <span
