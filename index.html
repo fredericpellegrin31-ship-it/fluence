@@ -42,7 +42,7 @@
             opacity: 0.4;
         }
 
-        /* MODIFICATION: Suppression du grossissement (scale 1) */
+        /* Scale 1 (taille normale) pour le mot courant, juste en blanc brillant */
         .word-current {
             color: #ffffff;
             opacity: 1;
@@ -178,18 +178,32 @@
             const currentIndexRef = useRef(0);
             const wordsRef = useRef([]);
 
-            // Helper pour récupérer le niveau actuel depuis l'état (pour avoir les modifs)
             const getCurrentLevel = () => levels.find(l => l.id === selectedLevelId);
 
             useEffect(() => { currentIndexRef.current = currentIndex; }, [currentIndex]);
             useEffect(() => { wordsRef.current = words; }, [words]);
 
+            // ALGORYTHME DE CORRESPONDANCE AMÉLIORÉ (VERBES EN -ENT)
             const isMatch = (spoken, target) => {
+                if (!spoken || !target) return false;
+                
+                // Correspondance exacte
                 if (spoken === target) return true;
-                if (spoken.includes(target)) return true;
+                
+                // Si la cible contient ce qui est dit (ex: "mangent" contient "mange")
+                // On ajoute une sécurité de longueur pour éviter que "a" valide "chat"
+                if (target.startsWith(spoken) && spoken.length >= 2) return true;
+                
+                // Cas spécifiques pluriels et verbes muets
                 if (target === spoken + 's') return true;
                 if (target === spoken + 'x') return true;
+                
+                // GESTION DES VERBES EN -ENT
+                // Ex: Target "mangent" (spoken: "mange") -> "mange" + "nt" = "mangent"
+                if (target === spoken + 'nt') return true;
+                // Cas où l'API renvoie une forme bizarre ou pour couvrir "ent" complet
                 if (target === spoken + 'ent') return true;
+
                 return false;
             };
 
@@ -215,29 +229,50 @@
                     for (let spokenWord of spokenWords) {
                         const normalizedSpoken = normalize(spokenWord);
                         
-                        for (let offset = 0; offset <= 2; offset++) {
-                            const lookAheadIndex = targetIndex + offset;
-                            if (lookAheadIndex >= targetList.length) break;
+                        // PRIORITÉ AU PRÉSENT ET FUTUR PROCHE POUR ÉVITER LES RETOURS EN ARRIÈRE INVOLONTAIRES
+                        // Ordre de recherche : 0 (actuel), 1 (suivant), 2 (surlendemain), puis -1 (précédent), etc.
+                        const searchOrder = [0, 1, 2, -1, -2, -3, -4, -5];
 
-                            const target = targetList[lookAheadIndex].clean;
+                        for (let offset of searchOrder) {
+                            const lookIndex = targetIndex + offset;
                             
-                            if (offset > 0 && target.length <= 3) {
-                                continue;
+                            // Vérification des bornes
+                            if (lookIndex < 0 || lookIndex >= targetList.length) continue;
+
+                            const target = targetList[lookIndex].clean;
+                            
+                            // Protection pour éviter de valider des petits mots n'importe où
+                            if (offset !== 0 && target.length <= 2) {
+                                // On est plus strict sur les petits mots quand on saute ou recule
+                                if (spokenWord !== target) continue; 
                             }
 
                             if (isMatch(normalizedSpoken, target)) {
-                                if (offset > 0) {
-                                    markAs(targetIndex, lookAheadIndex, 'skipped');
+                                // CAS 1 : AVANCEMENT (Prioritaire)
+                                if (offset >= 0) {
+                                    // Si on a sauté des mots (offset > 0), on les marque 'skipped'
+                                    if (offset > 0) {
+                                        markAs(targetIndex, lookIndex, 'skipped');
+                                    }
+                                    // On valide le mot actuel
+                                    markAs(lookIndex, lookIndex + 1, 'correct');
+                                    targetIndex = lookIndex + 1;
+                                    break;
                                 }
-                                markAs(lookAheadIndex, lookAheadIndex + 1, 'correct');
-                                targetIndex = lookAheadIndex + 1;
-                                break;
+                                
+                                // CAS 2 : RETOUR EN ARRIÈRE (Seulement si pas de match devant)
+                                if (offset < 0) {
+                                    // On valide le mot corrigé
+                                    markAs(lookIndex, lookIndex + 1, 'correct');
+                                    // On replace le curseur juste après ce mot pour que l'élève puisse enchaîner
+                                    targetIndex = lookIndex + 1;
+                                    break; 
+                                }
                             }
                         }
                     }
 
-                    if (targetIndex > currentIndexRef.current) {
-                        // NOTE: On ne lance plus le timer ici pour éviter les faux départs
+                    if (targetIndex !== currentIndexRef.current) {
                         setCurrentIndex(targetIndex);
                         if (targetIndex >= targetList.length) finish();
                     }
@@ -257,7 +292,9 @@
                 setResults(prev => {
                     const newRes = [...prev];
                     for (let i = from; i < to; i++) {
-                        if (newRes[i] !== 'correct') {
+                        // Si on revient en arrière pour corriger, on écrase le statut précédent
+                        // Si c'est un saut, on n'écrase pas un 'correct' déjà acquis
+                        if (status === 'correct' || newRes[i] !== 'correct') {
                             newRes[i] = status;
                         }
                     }
@@ -271,7 +308,6 @@
                 }
             }, [currentIndex, view]);
 
-            // --- GESTION DE L'ÉDITION ---
             const handleTextUpdate = (textId, field, value) => {
                 setLevels(prevLevels => prevLevels.map(level => {
                     if (level.id !== selectedLevelId) return level;
@@ -282,7 +318,6 @@
                 }));
             };
 
-            // --- JEU ---
             const startGame = (text) => {
                 setSelectedText(text);
                 const splitWords = text.content.split(' ').map((w, i) => ({
@@ -299,7 +334,7 @@
             };
 
             const startTimerAndListening = () => {
-                setStartTime(Date.now()); // Démarrage précis du chronomètre
+                setStartTime(Date.now());
                 setIsListening(true);
             };
 
@@ -308,8 +343,6 @@
                 if (recognitionRef.current) recognitionRef.current.stop();
                 setView('result');
             };
-
-            // --- VUES ---
 
             if (view === 'levels') {
                 return (
@@ -386,7 +419,6 @@
                         </div>
 
                         <div className="flex-1 relative flex flex-col items-center justify-center overflow-hidden">
-                            {/* MODIFICATION: Largeur adaptative (max-w-[90%]) pour plus de mots par ligne sur grand écran */}
                             <div className="w-full max-w-[95%] lg:max-w-[90%] h-full overflow-y-auto px-4 md:px-12 py-[40vh] text-center no-scrollbar scroll-smooth">
                                 <div className="text-5xl md:text-6xl leading-[2.5] tracking-wide">
                                     {words.map((word, i) => (
@@ -438,9 +470,7 @@
                 const correctCount = results.filter(r => r === 'correct').length;
                 const skippedCount = results.filter(r => r === 'skipped').length;
                 
-                // CALCUL MCLM CORRECT : (Mots Justes * 60) / Secondes
                 const endTime = Date.now();
-                // Utilisation de startTime s'il existe, sinon fallback (sécurité)
                 const durationSec = Math.max((endTime - (startTime || endTime)) / 1000, 1);
                 const wpm = Math.round((correctCount * 60) / durationSec);
 
@@ -491,3 +521,4 @@
     </script>
 </body>
 </html>
+
