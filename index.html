@@ -42,7 +42,7 @@
             opacity: 0.4;
         }
 
-        /* Scale 1 (taille normale) pour le mot courant, juste en blanc brillant */
+        /* Scale 1 (taille normale) pour le mot courant */
         .word-current {
             color: #ffffff;
             opacity: 1;
@@ -127,7 +127,7 @@
             </IconBase>
         );
 
-        const INITIAL_LEVELS = [
+       const INITIAL_LEVELS = [
             {
                 id: 'niv1',
                 name: 'Parcours 4 : texte 1 et 2',
@@ -156,9 +156,19 @@
                 ]
             }
         ];
-
+        // CORRECTION 1: Normalisation améliorée pour gérer les apostrophes
         const normalize = (str) => {
-            return str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "").trim();
+            return str.toLowerCase()
+                .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Enlève accents
+                .replace(/['’]/g, "") // CORRECTION: Enlève apostrophes (l'ami -> lami)
+                .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()«»]/g, "") // Enlève ponctuation étendue
+                .trim();
+        };
+
+        // CORRECTION 2: Détection de la ponctuation isolée
+        const isPunctuation = (str) => {
+            // Regex qui renvoie vrai si la chaîne ne contient que des symboles de ponctuation
+            return /^[^a-zA-Z0-9àâäéèêëîïôöùûüçÀÂÄÉÈÊËÎÏÔÖÙÛÜÇ]+$/.test(str);
         };
 
         const App = () => {
@@ -183,27 +193,28 @@
             useEffect(() => { currentIndexRef.current = currentIndex; }, [currentIndex]);
             useEffect(() => { wordsRef.current = words; }, [words]);
 
-            // ALGORYTHME DE CORRESPONDANCE AMÉLIORÉ (VERBES EN -ENT)
+            // CORRECTION 2 (Suite): Auto-avance sur la ponctuation
+            useEffect(() => {
+                // Si le mot actuel est de la ponctuation, on le valide automatiquement et on passe au suivant
+                if (view === 'game' && currentIndex < words.length && words[currentIndex].isPunctuation) {
+                    // Petit délai pour la fluidité visuelle (facultatif mais agréable)
+                    const timer = setTimeout(() => {
+                        markAs(currentIndex, currentIndex + 1, 'correct');
+                        setCurrentIndex(prev => prev + 1);
+                        if (currentIndex + 1 >= words.length) finish();
+                    }, 50);
+                    return () => clearTimeout(timer);
+                }
+            }, [currentIndex, words, view]);
+
             const isMatch = (spoken, target) => {
                 if (!spoken || !target) return false;
-                
-                // Correspondance exacte
                 if (spoken === target) return true;
-                
-                // Si la cible contient ce qui est dit (ex: "mangent" contient "mange")
-                // On ajoute une sécurité de longueur pour éviter que "a" valide "chat"
                 if (target.startsWith(spoken) && spoken.length >= 2) return true;
-                
-                // Cas spécifiques pluriels et verbes muets
                 if (target === spoken + 's') return true;
                 if (target === spoken + 'x') return true;
-                
-                // GESTION DES VERBES EN -ENT
-                // Ex: Target "mangent" (spoken: "mange") -> "mange" + "nt" = "mangent"
                 if (target === spoken + 'nt') return true;
-                // Cas où l'API renvoie une forme bizarre ou pour couvrir "ent" complet
                 if (target === spoken + 'ent') return true;
-
                 return false;
             };
 
@@ -229,42 +240,33 @@
                     for (let spokenWord of spokenWords) {
                         const normalizedSpoken = normalize(spokenWord);
                         
-                        // PRIORITÉ AU PRÉSENT ET FUTUR PROCHE POUR ÉVITER LES RETOURS EN ARRIÈRE INVOLONTAIRES
-                        // Ordre de recherche : 0 (actuel), 1 (suivant), 2 (surlendemain), puis -1 (précédent), etc.
                         const searchOrder = [0, 1, 2, -1, -2, -3, -4, -5];
 
                         for (let offset of searchOrder) {
                             const lookIndex = targetIndex + offset;
-                            
-                            // Vérification des bornes
                             if (lookIndex < 0 || lookIndex >= targetList.length) continue;
+
+                            // On saute la vérification si c'est de la ponctuation (déjà géré par l'auto-avance)
+                            if (targetList[lookIndex].isPunctuation) continue;
 
                             const target = targetList[lookIndex].clean;
                             
-                            // Protection pour éviter de valider des petits mots n'importe où
                             if (offset !== 0 && target.length <= 2) {
-                                // On est plus strict sur les petits mots quand on saute ou recule
                                 if (spokenWord !== target) continue; 
                             }
 
                             if (isMatch(normalizedSpoken, target)) {
-                                // CAS 1 : AVANCEMENT (Prioritaire)
                                 if (offset >= 0) {
-                                    // Si on a sauté des mots (offset > 0), on les marque 'skipped'
                                     if (offset > 0) {
                                         markAs(targetIndex, lookIndex, 'skipped');
                                     }
-                                    // On valide le mot actuel
                                     markAs(lookIndex, lookIndex + 1, 'correct');
                                     targetIndex = lookIndex + 1;
                                     break;
                                 }
                                 
-                                // CAS 2 : RETOUR EN ARRIÈRE (Seulement si pas de match devant)
                                 if (offset < 0) {
-                                    // On valide le mot corrigé
                                     markAs(lookIndex, lookIndex + 1, 'correct');
-                                    // On replace le curseur juste après ce mot pour que l'élève puisse enchaîner
                                     targetIndex = lookIndex + 1;
                                     break; 
                                 }
@@ -292,8 +294,6 @@
                 setResults(prev => {
                     const newRes = [...prev];
                     for (let i = from; i < to; i++) {
-                        // Si on revient en arrière pour corriger, on écrase le statut précédent
-                        // Si c'est un saut, on n'écrase pas un 'correct' déjà acquis
                         if (status === 'correct' || newRes[i] !== 'correct') {
                             newRes[i] = status;
                         }
@@ -320,9 +320,11 @@
 
             const startGame = (text) => {
                 setSelectedText(text);
+                // Préparation des mots avec détection de la ponctuation
                 const splitWords = text.content.split(' ').map((w, i) => ({
                     original: w,
                     clean: normalize(w),
+                    isPunctuation: isPunctuation(w), // Flag pour la ponctuation
                     id: i
                 }));
                 setWords(splitWords);
@@ -467,8 +469,9 @@
             }
 
             if (view === 'result') {
-                const correctCount = results.filter(r => r === 'correct').length;
-                const skippedCount = results.filter(r => r === 'skipped').length;
+                // CORRECTION: La ponctuation ne compte pas dans le calcul du score "mots corrects"
+                const correctCount = results.filter((r, i) => r === 'correct' && !words[i].isPunctuation).length;
+                const skippedCount = results.filter((r, i) => r === 'skipped' && !words[i].isPunctuation).length;
                 
                 const endTime = Date.now();
                 const durationSec = Math.max((endTime - (startTime || endTime)) / 1000, 1);
@@ -521,7 +524,3 @@
     </script>
 </body>
 </html>
-
-
-
-
